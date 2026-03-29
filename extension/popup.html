@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            width: 380px;
+            padding: 16px;
+            font-family: sans-serif;
+            background: #0a0a0f;
+            color: #e8e8f0;
+            margin: 0;
+        }
+
+        h2 {
+            font-size: 14px;
+            color: #00e5a0;
+            margin: 0 0 4px 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        #word {
+        font-size: 28px;
+        font-weight: bold;
+        margin: 0 0 12px 0;
+        color: white;
+        }
+
+        #video-container {
+        border-radius: 10px;
+        overflow: hidden;
+        margin-bottom: 12px;
+        }
+
+        iframe {
+        width: 100%;
+        height: 200px;
+        border: none;
+        }
+
+        #transcript {
+        font-size: 13px;
+        color: #aaa;
+        line-height: 1.6;
+        background: #1a1a2e;
+        padding: 10px;
+        border-radius: 8px;
+        }
+
+        #transcript span {
+        color: #00e5a0;
+        font-weight: bold;
+        }
+
+        #loading {
+        text-align: center;
+        padding: 40px;
+        color: #aaa;
+        }
+
+        #error {
+        text-align: center;
+        padding: 20px;
+        color: #ff6b6b;
+        display: none;
+        }
+    </style>
+</head>
+<body>
+    <h2>WordClip</h2>
+    <div id="loading">Finding a YouTube clip... 🎬</div>
+    <div id="error">No clip found for this word.</div>
+    <div id="content" style="display:none">
+        <div id="word"></div>
+        <div id="video-container">
+        <iframe id="youtube-player" allowfullscreen></iframe>
+        </div>
+        <div id="transcript"></div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
