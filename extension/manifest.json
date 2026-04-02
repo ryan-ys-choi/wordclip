@@ -5,7 +5,7 @@
     "description": "Highlight any word to see it used in a real Youtube video",
     "permissions": [
         "activeTab",
-        "storage",
+        "storage"
     ],
     "content_scripts": [
         {
@@ -19,5 +19,5 @@
     },
     "background": {
         "service_worker": "background.js"
-    },
+    }
 }
