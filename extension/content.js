@@ -17,7 +17,7 @@ document.addEventListener("mouseup", async () => {
     try {
       // Call backend directly from content.js
       const response = await fetch(
-        `http://localhost:8000/search?word=${encodeURIComponent(selectedText)}`
+        `http://18.223.134.168:8001/search?word=${encodeURIComponent(selectedText)}`
       );
       const data = await response.json();
 
