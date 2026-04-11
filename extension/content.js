@@ -18,7 +18,7 @@ document.addEventListener("mouseup", async () => {
     try {
       // Step 1: Get video IDs from your backend
       const backendResponse = await fetch(
-        `http://18.223.134.168:8001/search?word=${encodeURIComponent(selectedText)}`
+        `https://wordclip.duckdns.org/search?word=${encodeURIComponent(selectedText)}`
       );
       const data = await backendResponse.json();
 
