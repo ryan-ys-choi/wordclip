@@ -1,10 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from youtube_transcript_api import YouTubeTranscriptApi
 import requests
 import os
-
 
 load_dotenv()
 
@@ -26,9 +24,8 @@ def root():
 @app.get("/search")
 def search(word: str):
     try:
-        # Step 1: Search YouTube for videos
         search_url = "https://www.googleapis.com/youtube/v3/search"
-        search_params = {
+        params = {
             "q": f"{word} english",
             "part": "snippet",
             "type": "video",
@@ -39,50 +36,17 @@ def search(word: str):
             "key": YOUTUBE_API_KEY
         }
 
-        search_response = requests.get(search_url, params=search_params)
-        search_data = search_response.json()
+        response = requests.get(search_url, params=params)
+        data = response.json()
 
-        if not search_data.get("items"):
+        if not data.get("items"):
             return {"error": "No videos found"}
 
-        # Step 2: Check each video's transcript for the word
-        for item in search_data["items"]:
-            video_id = item["id"]["videoId"]
+        video_ids = [item["id"]["videoId"] for item in data["items"]]
 
-            try:
-                transcript = YouTubeTranscriptApi.get_transcript(
-                    video_id, 
-                    languages=["en"]
-                )
-
-                # Search for word in transcript
-                for i, entry in enumerate(transcript):
-                    if word.lower() in entry["text"].lower():
-                        start_seconds = int(entry["start"])
-
-                        # Get surrounding context
-                        context_entries = transcript[max(0, i-1):i+3]
-                        context = " ".join([e["text"] for e in context_entries])
-
-                        return {
-                            "word": word,
-                            "video_id": video_id,
-                            "start_time": max(0, start_seconds - 2),
-                            "transcript": context.strip(),
-                            "found_in_captions": True
-                        }
-
-            except Exception:
-                continue
-
-        # Fallback
-        first = search_data["items"][0]
         return {
             "word": word,
-            "video_id": first["id"]["videoId"],
-            "start_time": 0,
-            "transcript": first["snippet"]["description"][:200],
-            "found_in_captions": False
+            "video_ids": video_ids
         }
 
     except Exception as e:
