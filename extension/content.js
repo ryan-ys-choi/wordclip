@@ -1,6 +1,6 @@
 let tooltip = null;
 
-document.addEventListener("mouseup", () => {
+document.addEventListener("mouseup", async () => {
   const selectedText = window.getSelection().toString().trim();
 
   if (tooltip) {
@@ -13,22 +13,123 @@ document.addEventListener("mouseup", () => {
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
 
-    // Show loading first
     showLoading(rect, selectedText);
 
-    // Ask background.js to find the video
-    chrome.runtime.sendMessage(
-      { action: "wordSelected", word: selectedText },
-      (response) => {
-        if (tooltip) tooltip.remove();
+    try {
+      // Step 1: Get video IDs from your backend
+      const backendResponse = await fetch(
+        `http://18.223.134.168:8001/search?word=${encodeURIComponent(selectedText)}`
+      );
+      const data = await backendResponse.json();
 
-        if (response && response.video_id) {
-          showTooltip(rect, selectedText, response);
-        }
+      if (data.error || !data.video_ids) {
+        if (tooltip) tooltip.remove();
+        return;
       }
-    );
+
+      // Step 2: Try each video to find exact timestamp
+      // Runs in content script = looks like real browser to YouTube ✅
+      let result = null;
+      for (const videoId of data.video_ids) {
+        result = await findWordInVideo(videoId, selectedText);
+        if (result) break;
+      }
+
+      // Fallback if no exact match found
+      if (!result) {
+        result = {
+          word: selectedText,
+          video_id: data.video_ids[0],
+          start_time: 0,
+          transcript: `Example of "${selectedText}" in context`,
+          found_in_captions: false
+        };
+      }
+
+      if (tooltip) tooltip.remove();
+      showTooltip(rect, selectedText, result);
+
+    } catch (error) {
+      console.error("WordClip error:", error);
+      if (tooltip) tooltip.remove();
+    }
   }
 });
+
+async function findWordInVideo(videoId, word) {
+  try {
+    // POST to YouTube Innertube API
+    const playerResponse = await fetch(
+      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-YouTube-Client-Name": "1",
+          "X-YouTube-Client-Version": "2.20240101.00.00",
+        },
+        body: JSON.stringify({
+          videoId: videoId,
+          context: {
+            client: {
+              clientName: "WEB",
+              clientVersion: "2.20240101.00.00",
+              hl: "en",
+              gl: "US"
+            }
+          }
+        })
+      }
+    );
+
+    if (!playerResponse.ok) return null;
+
+    const playerData = await playerResponse.json();
+    const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+
+    const englishTrack = captions.find(t =>
+      t.languageCode === "en" || t.languageCode === "en-US"
+    ) || captions[0];
+
+    if (!englishTrack || !englishTrack.baseUrl) return null;
+
+    const captionUrl = englishTrack.baseUrl + "&fmt=json3";
+    const captionResponse = await fetch(captionUrl);
+    const text = await captionResponse.text();
+
+    if (!text || text.trim() === "") return null;
+
+    const captionData = JSON.parse(text);
+    const events = captionData.events || [];
+
+    for (let i = 0; i < events.length; i++) {
+      const segs = events[i].segs || [];
+      const segText = segs.map(s => s.utf8 || "").join(" ");
+
+      if (segText.toLowerCase().includes(word.toLowerCase())) {
+        const startMs = events[i].tStartMs || 0;
+        const startSeconds = Math.floor(startMs / 1000);
+
+        const contextEvents = events.slice(Math.max(0, i - 1), i + 3);
+        const context = contextEvents
+          .map(e => (e.segs || []).map(s => s.utf8 || "").join(" "))
+          .join(" ");
+
+        return {
+          word: word,
+          video_id: videoId,
+          start_time: Math.max(0, startSeconds - 2),
+          transcript: context.trim(),
+          found_in_captions: true
+        };
+      }
+    }
+    return null;
+
+  } catch (e) {
+    return null;
+  }
+}
 
 function showLoading(rect, word) {
   tooltip = document.createElement("div");
@@ -53,7 +154,7 @@ function showTooltip(rect, word, data) {
     <div style="color:#00e5a0;font-size:11px;letter-spacing:1px;margin-bottom:4px">WORDCLIP</div>
     <div style="font-size:22px;font-weight:bold;margin-bottom:6px">${word}</div>
     ${label}
-    <iframe 
+    <iframe
       src="https://www.youtube.com/embed/${data.video_id}?autoplay=1&start=${data.start_time}"
       width="100%" height="180" frameborder="0" allowfullscreen
       style="border-radius:8px;margin-top:8px"

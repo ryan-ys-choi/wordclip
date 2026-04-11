@@ -3,16 +3,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const word = message.word;
     console.log("Received word:", word);
 
-    // Step 1: Get video IDs from your backend
     fetch(`http://18.223.134.168:8001/search?word=${encodeURIComponent(word)}`)
       .then(response => response.json())
       .then(async data => {
+        console.log("Backend response:", data);
+
         if (data.error || !data.video_ids) {
           sendResponse({ error: "No videos found" });
           return;
         }
 
-        // Step 2: Try each video to find transcript with word
         for (const videoId of data.video_ids) {
           const result = await findWordInVideo(videoId, word);
           if (result) {
@@ -21,7 +21,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
 
-        // Fallback: return first video without timestamp
         sendResponse({
           word: word,
           video_id: data.video_ids[0],
@@ -35,20 +34,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ error: error.message });
       });
 
-    return true; // keep message channel open
+    return true;
   }
 });
 
 async function findWordInVideo(videoId, word) {
   try {
-    // Fetch transcript directly from YouTube
-    // This works from user's browser (not blocked like EC2)
-    const url = `https://www.youtube.com/api/timedtext?lang=en&v=${videoId}&fmt=json3`;
-    const response = await fetch(url);
+    console.log("Getting caption URL for:", videoId);
 
-    if (!response.ok) return null;
+    // POST to YouTube Innertube API with correct headers
+    const playerResponse = await fetch(
+      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-YouTube-Client-Name": "1",
+          "X-YouTube-Client-Version": "2.20240101.00.00",
+        },
+        body: JSON.stringify({
+          videoId: videoId,
+          context: {
+            client: {
+              clientName: "WEB",
+              clientVersion: "2.20240101.00.00",
+              hl: "en",
+              gl: "US"
+            }
+          }
+        })
+      }
+    );
 
-    const text = await response.text();
+    console.log("Player response status:", playerResponse.status);
+    const playerData = await playerResponse.json();
+    console.log("Player data keys:", Object.keys(playerData));
+
+    const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    console.log("Caption tracks found:", captions.length);
+
+    const englishTrack = captions.find(t =>
+      t.languageCode === "en" || t.languageCode === "en-US"
+    ) || captions[0];
+
+    if (!englishTrack || !englishTrack.baseUrl) {
+      console.log("No caption track for:", videoId);
+      return null;
+    }
+
+    // Fetch actual captions from baseUrl
+    const captionUrl = englishTrack.baseUrl + "&fmt=json3";
+    console.log("Fetching captions from baseUrl");
+
+    const captionResponse = await fetch(captionUrl);
+    const text = await captionResponse.text();
+    console.log("Caption length:", text.length);
+
     if (!text || text.trim() === "") return null;
 
     const data = JSON.parse(text);
@@ -56,13 +97,12 @@ async function findWordInVideo(videoId, word) {
 
     for (let i = 0; i < events.length; i++) {
       const segs = events[i].segs || [];
-      const text = segs.map(s => s.utf8 || "").join(" ");
+      const segText = segs.map(s => s.utf8 || "").join(" ");
 
-      if (text.toLowerCase().includes(word.toLowerCase())) {
+      if (segText.toLowerCase().includes(word.toLowerCase())) {
         const startMs = events[i].tStartMs || 0;
         const startSeconds = Math.floor(startMs / 1000);
 
-        // Get surrounding context
         const contextEvents = events.slice(Math.max(0, i - 1), i + 3);
         const context = contextEvents
           .map(e => (e.segs || []).map(s => s.utf8 || "").join(" "))
@@ -78,8 +118,9 @@ async function findWordInVideo(videoId, word) {
       }
     }
     return null;
+
   } catch (e) {
-    console.error("Transcript fetch error:", e);
+    console.error("Error for", videoId, ":", e.message);
     return null;
   }
 }
