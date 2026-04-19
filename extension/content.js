@@ -34,21 +34,24 @@ document.addEventListener("mouseup", async () => {
         videoIds: data.video_ids
       });
 
-      if (!result) {
-        if (tooltip) tooltip.remove();
-        showNotFound(rect, selectedText);
-        return;
-      }
+      // Fall back to first video from start if no exact timestamp found
+      const finalResult = result || {
+        word: selectedText,
+        video_id: data.video_ids[0],
+        start_time: 0,
+        transcript: null,
+        found_in_captions: false
+      };
 
       chrome.storage.local.set({
-        currentWord: result.word,
-        videoId: result.video_id,
-        startTime: result.start_time,
-        transcript: result.transcript || ""
+        currentWord: finalResult.word,
+        videoId: finalResult.video_id,
+        startTime: finalResult.start_time,
+        transcript: finalResult.transcript || ""
       });
 
       if (tooltip) tooltip.remove();
-      showTooltip(rect, selectedText, result);
+      showTooltip(rect, selectedText, finalResult);
 
     } catch (error) {
       console.error("[WordClip] Error:", error);
@@ -91,7 +94,9 @@ function showTooltip(rect, word, data) {
   tooltip = document.createElement("div");
   tooltip.style.cssText = getTooltipStyle(rect);
 
-  const label = `<span style="color:#00e5a0;font-size:11px">✅ Exact moment found</span>`;
+  const label = data.found_in_captions
+    ? `<span style="color:#00e5a0;font-size:11px">✅ Exact moment found</span>`
+    : `<span style="color:#888;font-size:11px">▶ Playing from start</span>`;
 
   const transcriptHtml = data.transcript
     ? `<div style="margin-top:10px;font-size:12px;color:#aaa;line-height:1.5">${data.transcript}</div>`
