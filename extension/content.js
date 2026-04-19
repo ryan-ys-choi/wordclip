@@ -16,35 +16,40 @@ document.addEventListener("mouseup", async () => {
     showLoading(rect, selectedText);
 
     try {
-      // Step 1: Get video IDs from your backend
       const backendResponse = await fetch(
         `https://wordclip.duckdns.org/search?word=${encodeURIComponent(selectedText)}`
       );
       const data = await backendResponse.json();
 
-      if (data.error || !data.video_ids) {
+      if (data.error || !data.video_ids || data.video_ids.length === 0) {
         if (tooltip) tooltip.remove();
+        showNotFound(rect, selectedText);
         return;
       }
 
-      // Step 2: Try each video to find exact timestamp
-      // Runs in content script = looks like real browser to YouTube ✅
       let result = null;
       for (const videoId of data.video_ids) {
         result = await findWordInVideo(videoId, selectedText);
         if (result) break;
       }
 
-      // Fallback if no exact match found
       if (!result) {
+        // No caption match found in any video — show honest fallback
         result = {
           word: selectedText,
           video_id: data.video_ids[0],
           start_time: 0,
-          transcript: `Example of "${selectedText}" in context`,
+          transcript: null,
           found_in_captions: false
         };
       }
+
+      chrome.storage.local.set({
+        currentWord: result.word,
+        videoId: result.video_id,
+        startTime: result.start_time,
+        transcript: result.transcript || ""
+      });
 
       if (tooltip) tooltip.remove();
       showTooltip(rect, selectedText, result);
@@ -52,13 +57,13 @@ document.addEventListener("mouseup", async () => {
     } catch (error) {
       console.error("WordClip error:", error);
       if (tooltip) tooltip.remove();
+      showNotFound(rect, selectedText);
     }
   }
 });
 
 async function findWordInVideo(videoId, word) {
   try {
-    // POST to YouTube Innertube API
     const playerResponse = await fetch(
       "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
       {
@@ -102,17 +107,22 @@ async function findWordInVideo(videoId, word) {
     const captionData = JSON.parse(text);
     const events = captionData.events || [];
 
+    // Escape any regex special characters in the word
+    const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const wordRegex = new RegExp(`\\b${escapedWord}\\b`, "i");
+
     for (let i = 0; i < events.length; i++) {
       const segs = events[i].segs || [];
-      const segText = segs.map(s => s.utf8 || "").join(" ");
+      // Join without spaces — YouTube segments already contain their own spacing
+      const segText = segs.map(s => s.utf8 || "").join("");
 
-      if (segText.toLowerCase().includes(word.toLowerCase())) {
+      if (wordRegex.test(segText)) {
         const startMs = events[i].tStartMs || 0;
         const startSeconds = Math.floor(startMs / 1000);
 
         const contextEvents = events.slice(Math.max(0, i - 1), i + 3);
         const context = contextEvents
-          .map(e => (e.segs || []).map(s => s.utf8 || "").join(" "))
+          .map(e => (e.segs || []).map(s => s.utf8 || "").join(""))
           .join(" ");
 
         return {
@@ -142,13 +152,35 @@ function showLoading(rect, word) {
   document.body.appendChild(tooltip);
 }
 
+function showNotFound(rect, word) {
+  tooltip = document.createElement("div");
+  tooltip.style.cssText = getTooltipStyle(rect);
+  tooltip.innerHTML = `
+    <div style="color:#00e5a0;font-size:11px;letter-spacing:1px;margin-bottom:4px">WORDCLIP</div>
+    <div style="font-size:22px;font-weight:bold;margin-bottom:6px">${word}</div>
+    <div style="color:#888;font-size:13px;line-height:1.5">No YouTube clip found for this word.</div>
+    <div style="text-align:right;margin-top:8px">
+      <span id="wordclip-close" style="cursor:pointer;color:#666;font-size:11px">✕ close</span>
+    </div>
+  `;
+  document.body.appendChild(tooltip);
+  document.getElementById("wordclip-close").addEventListener("click", () => {
+    tooltip.remove();
+    tooltip = null;
+  });
+}
+
 function showTooltip(rect, word, data) {
   tooltip = document.createElement("div");
   tooltip.style.cssText = getTooltipStyle(rect);
 
   const label = data.found_in_captions
     ? `<span style="color:#00e5a0;font-size:11px">✅ Exact moment found</span>`
-    : `<span style="color:#888;font-size:11px">⚠️ Approximate match</span>`;
+    : `<span style="color:#888;font-size:11px">⚠️ No exact timestamp — playing from start</span>`;
+
+  const transcriptHtml = data.transcript
+    ? `<div style="margin-top:10px;font-size:12px;color:#aaa;line-height:1.5">${data.transcript}</div>`
+    : "";
 
   tooltip.innerHTML = `
     <div style="color:#00e5a0;font-size:11px;letter-spacing:1px;margin-bottom:4px">WORDCLIP</div>
@@ -159,7 +191,7 @@ function showTooltip(rect, word, data) {
       width="100%" height="180" frameborder="0" allowfullscreen
       style="border-radius:8px;margin-top:8px"
     ></iframe>
-    <div style="margin-top:10px;font-size:12px;color:#aaa;line-height:1.5">${data.transcript}</div>
+    ${transcriptHtml}
     <div style="text-align:right;margin-top:8px">
       <span id="wordclip-close" style="cursor:pointer;color:#666;font-size:11px">✕ close</span>
     </div>
