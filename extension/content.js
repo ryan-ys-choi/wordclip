@@ -64,6 +64,7 @@ document.addEventListener("mouseup", async () => {
 
 async function findWordInVideo(videoId, word) {
   try {
+    console.log(`[WordClip] Fetching player data for ${videoId}`);
     const playerResponse = await fetch(
       "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
       {
@@ -87,25 +88,43 @@ async function findWordInVideo(videoId, word) {
       }
     );
 
-    if (!playerResponse.ok) return null;
+    if (!playerResponse.ok) {
+      console.warn(`[WordClip] Player API returned ${playerResponse.status} for ${videoId}`);
+      return null;
+    }
 
     const playerData = await playerResponse.json();
     const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    console.log(`[WordClip] ${videoId}: ${captions.length} caption track(s) found`);
+
+    if (captions.length === 0) {
+      const reason = playerData?.playabilityStatus?.reason || "unknown";
+      console.warn(`[WordClip] No captions for ${videoId}. Playability: ${reason}`);
+      return null;
+    }
 
     const englishTrack = captions.find(t =>
       t.languageCode === "en" || t.languageCode === "en-US"
     ) || captions[0];
 
-    if (!englishTrack || !englishTrack.baseUrl) return null;
+    if (!englishTrack || !englishTrack.baseUrl) {
+      console.warn(`[WordClip] No usable caption track for ${videoId}`);
+      return null;
+    }
 
+    console.log(`[WordClip] ${videoId}: fetching captions (lang: ${englishTrack.languageCode})`);
     const captionUrl = englishTrack.baseUrl + "&fmt=json3";
     const captionResponse = await fetch(captionUrl);
     const text = await captionResponse.text();
 
-    if (!text || text.trim() === "") return null;
+    if (!text || text.trim() === "") {
+      console.warn(`[WordClip] Empty caption response for ${videoId}`);
+      return null;
+    }
 
     const captionData = JSON.parse(text);
     const events = captionData.events || [];
+    console.log(`[WordClip] ${videoId}: searching ${events.length} caption events for "${word}"`);
 
     // Escape any regex special characters in the word
     const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -125,6 +144,7 @@ async function findWordInVideo(videoId, word) {
           .map(e => (e.segs || []).map(s => s.utf8 || "").join(""))
           .join(" ");
 
+        console.log(`[WordClip] Found "${word}" in ${videoId} at ${startSeconds}s`);
         return {
           word: word,
           video_id: videoId,
@@ -134,9 +154,12 @@ async function findWordInVideo(videoId, word) {
         };
       }
     }
+
+    console.warn(`[WordClip] "${word}" not found in captions of ${videoId}`);
     return null;
 
   } catch (e) {
+    console.error(`[WordClip] Error processing ${videoId}:`, e);
     return null;
   }
 }
