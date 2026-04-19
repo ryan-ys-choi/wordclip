@@ -10,11 +10,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function findWordInVideos(videoIds, word) {
-  for (const videoId of videoIds) {
-    const result = await findWordInVideo(videoId, word);
-    if (result) return result;
-  }
-  return null;
+  const results = await Promise.all(videoIds.map(id => findWordInVideo(id, word)));
+  return results.find(r => r !== null) || null;
 }
 
 async function findWordInVideo(videoId, word) {
