@@ -19,36 +19,35 @@ async function findWordInVideos(videoIds, word) {
 
 async function findWordInVideo(videoId, word) {
   try {
-    console.log(`[WordClip] Fetching player data for ${videoId}`);
-    const playerResponse = await fetch(
-      "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-YouTube-Client-Name": "1",
-          "X-YouTube-Client-Version": "2.20240101.00.00",
-        },
-        body: JSON.stringify({
-          videoId: videoId,
-          context: {
-            client: {
-              clientName: "WEB",
-              clientVersion: "2.20240101.00.00",
-              hl: "en",
-              gl: "US"
-            }
-          }
-        })
-      }
-    );
+    console.log(`[WordClip] Fetching watch page for ${videoId}`);
 
-    if (!playerResponse.ok) {
-      console.warn(`[WordClip] Player API returned ${playerResponse.status} for ${videoId}`);
+    // Scrape ytInitialPlayerResponse from the watch page — no client version needed
+    const watchResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: { "Accept-Language": "en-US,en;q=0.9" }
+    });
+
+    if (!watchResponse.ok) {
+      console.warn(`[WordClip] Watch page returned ${watchResponse.status} for ${videoId}`);
       return null;
     }
 
-    const playerData = await playerResponse.json();
+    const html = await watchResponse.text();
+    const marker = "var ytInitialPlayerResponse = ";
+    const markerIdx = html.indexOf(marker);
+
+    if (markerIdx === -1) {
+      console.warn(`[WordClip] ytInitialPlayerResponse not found for ${videoId}`);
+      return null;
+    }
+
+    // Walk forward counting braces to extract the full JSON object
+    let depth = 0, i = markerIdx + marker.length;
+    const jsonStart = i;
+    for (; i < html.length; i++) {
+      if (html[i] === "{") depth++;
+      else if (html[i] === "}") { depth--; if (depth === 0) break; }
+    }
+    const playerData = JSON.parse(html.substring(jsonStart, i + 1));
     const captions = playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
     console.log(`[WordClip] ${videoId}: ${captions.length} caption track(s) found`);
 
